@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
-import fs from "fs/promises";
+import { initializeDatabase, getBookmarks, addBookmark } from "./db.ts";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -10,31 +10,13 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
-const BOOKMARKS_FILE = path.join(__dirname, "bookmarks.json");
 
 app.use(express.json());
 app.use(cors());
 app.use(express.static("public"));
 
-// Helper function to read bookmarks
-async function readBookmarks() {
-  try {
-    const data = await fs.readFile(BOOKMARKS_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (error) {
-    console.error("Error reading bookmarks file:", error);
-    return [];
-  }
-}
-
-// Helper function to write bookmarks
-async function writeBookmarks(bookmarks: any[]) {
-  try {
-    await fs.writeFile(BOOKMARKS_FILE, JSON.stringify(bookmarks, null, 2));
-  } catch (error) {
-    console.error("Error writing bookmarks file:", error);
-  }
-}
+// Initialize database when server starts
+await initializeDatabase();
 
 // Endpoint to fetch story from HN
 app.post("/fetch-story", async (req, res) => {
@@ -71,23 +53,26 @@ app.post("/fetch-story", async (req, res) => {
 app.post("/bookmark", async (req, res) => {
   const bookmark = req.body;
 
-  const bookmarks = await readBookmarks();
-
-  // Avoid duplicates
-  if (bookmarks.some((b: any) => b.id === bookmark.id)) {
-    return res.status(400).json({ error: "Bookmark already exists." });
+  try {
+    await addBookmark(bookmark);
+    res.json({ success: true });
+  } catch (error) {
+    if (error.message.includes("UNIQUE constraint failed")) {
+      res.status(400).json({ error: "Bookmark already exists." });
+    } else {
+      res.status(500).json({ error: "Error saving bookmark" });
+    }
   }
-
-  bookmarks.push(bookmark);
-  await writeBookmarks(bookmarks);
-
-  res.json({ success: true });
 });
 
 // Endpoint to retrieve all bookmarks
 app.get("/bookmarks", async (_req, res) => {
-  const bookmarks = await readBookmarks();
-  res.json(bookmarks);
+  try {
+    const bookmarks = await getBookmarks();
+    res.json(bookmarks);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching bookmarks" });
+  }
 });
 
 app.listen(PORT, () => {
